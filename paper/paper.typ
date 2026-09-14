@@ -16,8 +16,9 @@
     @qwen3 backbone with two adapters (extractive QA on HotpotQA @hotpotqa, arithmetic reasoning on GSM8K
     @gsm8k), we sweep the boundary at which the specialist takes over from the reused base cache and measure
     paired quality differences and serving cost. #strong[Full-prefix reuse had the lowest prefill cost and a
-    small observed quality difference (GSM8K exact-match $Delta = -1.0$ points, 95% CI $[-5.0, +3.0]$) in
-    our tested setup. Partial recomputation provided no demonstrated quality advantage. Neither quality
+    small quality difference on held-out GSM8K ($Delta = -4.6$ EM at a 160-token budget) that proved
+    #emph[unstable] — shrinking to $-3.0$ at a larger budget and to $-0.8$ under a second training seed, only
+    the first excluding zero. Partial recomputation provided no demonstrated advantage. Neither quality
     equivalence nor a general boundary-selection rule is established.] We also report a closed-form ridge KV
     translator that did not beat direct reuse, and specialist-dependence contrasts whose intervals all
     include zero. The measured serving benefit is #strong[warm-cache time-to-first-token], which grows with
@@ -239,6 +240,16 @@ EM, 6.6% capped), and the penalty shrinks to $Delta = -3.0$ (CI $[-7.2, +1.4]$, 
 material part of the 160-token $-4.6$ was decoding-budget truncation; at an adequate budget the reuse penalty
 is smaller and not statistically distinguishable from zero, though its point estimate stays negative.
 
+*Replication (second training seed).* We retrained the math specialist from a different initialization seed
+(same data, recipe, and held-out `test[580:1080]`). The second-seed adapter reached a comparable native
+baseline (53.8 vs. 54.4 EM), confirming a valid replication, but its reuse penalty was
+$Delta = -0.8$ (CI $[-5.0, +3.2]$) — much smaller than seed 1's $-4.6$ and not distinguishable from zero.
+The penalty therefore does #strong[not] reproduce robustly across seeds. Taken with the budget diagnostic,
+the GSM8K full-prefix reuse penalty is small and negative in point estimate but #strong[unstable across both
+decoding budget and training seed] (three held-out estimates: $-4.6$, $-3.0$, $-0.8$; only the first excludes
+zero). The base-only gap ($approx -45$ EM) reproduces cleanly, so adapter necessity is robust even though the
+reuse penalty is not.
+
 *Held-out vs. overlapping evaluation.* The GSM8K penalty above ($-4.6$, `test[580:1080]`) comes from
 examples untouched by any earlier run. The boundary study below used `test[80:580]`, which overlaps prior
 development, and gave $-1.0$ $[-5.0,+3.0]$ for the same full-prefix condition. The two intervals overlap, so
@@ -360,9 +371,10 @@ excludes zero and the QA penalty grows with context. Several gaps bound the clai
   (test[80:200]) entirely and the earliest development run used test[0:500]. A clean result needs a frozen
   harness and primary comparison, then a fresh evaluation whose size is set for a prespecified precision or
   noninferiority margin.
-- #strong[Generality.] One backbone, one adapter seed per task, small (1.7B) scale, two tasks. A
-  #strong[frozen replication] on a second adapter seed and a different backbone would test whether the small
-  full-prefix gap and the null specialist-dependence result are stable.
+- #strong[Generality.] One backbone, small (1.7B) scale, two tasks. A second-seed replication is done (above)
+  and already shows the GSM8K reuse penalty is #emph[not] seed-stable ($-4.6 → -0.8$); replication on a
+  #strong[different backbone] and additional seeds is the remaining generality test, alongside re-checking
+  the null specialist-dependence result under those conditions.
 
 The boundary sweep is parked; the exploratory measurement history is in @app-history.
 
@@ -388,9 +400,10 @@ an #emph[identical] prefix under the #emph[same] model. Our question is reuse of
 
 For composable serving on a shared backbone, reusing the backbone's prefill KV cache across already-trained
 standard LoRA specialists is a #strong[quality–latency tradeoff]. The measured benefit is warm-cache
-time-to-first-token, which grows with context (≈16× at 8K); the cost is a small, mostly significant quality
-loss (GSM8K $-4.6$ EM on held-out examples; QA $-6.6$/$-4.5$ F1 at 2K/8K), part of which may be generation
-truncation (unresolved). The memory story is the paper's main correction: this implementation reuses KV
+time-to-first-token, which grows with context (≈16× at 8K); the cost is a small quality loss that we found
+#emph[unstable] on GSM8K (held-out $-4.6$ EM at a 160-token budget, but $-3.0$ at a larger budget and $-0.8$
+under a second seed) and context-dependent on QA ($-6.6$/$-4.5$ F1 at 2K/8K). Part of the GSM8K loss is
+generation truncation. The memory story is the paper's main correction: this implementation reuses KV
 #emph[values] but #emph[copies their storage] — two-branch peak was only 12% lower at 8K and the prefix was
 never physically shared, so shared-cache memory savings are #emph[not] achieved and would need a paged cache.
 Partial recomputation gave no demonstrated advantage; a ridge translator did not earn its cost;

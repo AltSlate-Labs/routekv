@@ -36,6 +36,8 @@ Frozen configuration, sample identities, and metric definitions for the arrays i
   (Q=score, TT=TTFT ms, LAT=completion ms, PK=peak GB, PKO=peak over weights GB, CAP=cap-hit 0/1).
 - `budget_320.npz` — generation-budget diagnostic (GSM8K test[580:1080], budget 320).
   Keys: `nat, reu, capn, capr`.
+- `matched_gsm8k_0_math_s2b.npz` — second-seed replication (adapter `math_s2b`, `--seed 2`, init only,
+  original data order; GSM8K test[580:1080]). Same key schema as the other `matched_*` files.
 
 Code revision: see the repository's git history; the harnesses that produced these arrays are in `code/`
 (`confirm_did.py`, `merge_did.py`, `matched.py`, `residency.py`, `budget_diag.py`).

@@ -204,7 +204,8 @@ cache-reconstruction differences but #emph[not further diagnosed]. It is small r
 effects below.
 
 *Central result.* On 500 untouched GSM8K examples, full-prefix base-KV reuse reduced accuracy from 54.4% to
-49.8% ($Delta = -4.6$ percentage points; paired CI $[-8.8, -0.4]$). In the 8K supplied-context QA workload,
+49.8% ($Delta = -4.6$ percentage points; paired CI $[-8.8, -0.4]$; a larger generation budget shrinks this to
+$-3.0$, CI including zero — see #emph[Truncation] below). In the 8K supplied-context QA workload,
 reuse reduced warm-cache TTFT from 486 ms to 30 ms. Two-branch peak memory was 12% lower, but storage
 inspection found no physical prefix sharing. These results establish a quality–TTFT tradeoff; persistent
 shared-cache storage remains unimplemented.
@@ -231,9 +232,12 @@ costs a small but mostly significant amount of quality: $-4.6$ EM on GSM8K and $
   ],
 ) <tab-quality>
 
-*Truncation.* Reuse increased the frequency of reaching the 160-token generation limit from 15% to 30% on
-GSM8K. The contribution of truncation to the accuracy difference remains unresolved; a focused follow-up
-compares native and reuse at a larger, pre-frozen generation budget on all 500 examples (in progress).
+*Truncation contributes.* Reuse increased the frequency of reaching the 160-token generation limit from 15%
+to 30% on GSM8K. A pre-frozen larger-budget diagnostic (320 tokens, same 500 held-out examples) shows this
+matters: at 320 tokens both conditions improve and cap-hit drops (native 59.4 EM, 1.2% capped; reuse 56.4
+EM, 6.6% capped), and the penalty shrinks to $Delta = -3.0$ (CI $[-7.2, +1.4]$, now including zero). So a
+material part of the 160-token $-4.6$ was decoding-budget truncation; at an adequate budget the reuse penalty
+is smaller and not statistically distinguishable from zero, though its point estimate stays negative.
 
 *Held-out vs. overlapping evaluation.* The GSM8K penalty above ($-4.6$, `test[580:1080]`) comes from
 examples untouched by any earlier run. The boundary study below used `test[80:580]`, which overlaps prior
@@ -343,9 +347,10 @@ establish specialist dependence; we do not inflate the sample to seek significan
 The central claim is a quality–latency tradeoff, not equivalence: the GSM8K held-out reuse penalty ($-4.6$)
 excludes zero and the QA penalty grows with context. Several gaps bound the claims:
 
-- #strong[Truncation is unresolved.] Reuse doubled the GSM8K generation-cap rate (15%→30%), so part of the
-  EM gap may be truncation rather than reasoning. The pre-frozen larger-budget diagnostic (native vs. reuse
-  at 320 tokens on all 500 examples) is running to settle this; until then the penalty's composition is open.
+- #strong[The penalty is partly truncation.] Reuse doubled the GSM8K generation-cap rate (15%→30%); a
+  pre-frozen 320-token diagnostic shrinks the penalty from $-4.6$ to $-3.0$ (CI now includes zero). Part of
+  the loss is decoding-budget truncation; a residual negative point estimate remains, so a budget-independent
+  penalty is neither established nor excluded.
 - #strong[Two "shared context" workloads differ.] Full-prefix reuse as measured shares an #emph[identical
   full prompt] across specialists. Sharing #emph[background passages] across #emph[different] questions is a
   different setting our full-prefix result does not establish; it corresponds to a mid-prompt boundary, which

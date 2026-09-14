@@ -1,7 +1,31 @@
 # RouteKV — Shared-Prefix KV Reuse Across Standard LoRA Adapters
 
+[![paper](https://img.shields.io/badge/paper-PDF-b31b1b)](paper/paper.pdf)
+![status](https://img.shields.io/badge/status-preliminary-yellow)
+![python](https://img.shields.io/badge/python-3.11-blue)
+![transformers](https://img.shields.io/badge/transformers-5.5-orange)
+![peft](https://img.shields.io/badge/peft-0.20-orange)
+![backbone](https://img.shields.io/badge/backbone-Qwen3--1.7B-brightgreen)
+
 Code, data, and paper for *Shared-Prefix KV Reuse Across Standard LoRA Adapters: Quality and Serving
 Tradeoffs* (AltSlate Labs, 2026).
+
+## Figures
+
+**The four takeover boundaries** — blue = reused base-computed KV, orange = specialist-computed, green =
+generated answer. Only the boundary moves; the prompt and decoding are identical.
+
+![Takeover boundaries](paper/figures/boundary_schematic.png)
+
+**Non-monotonic boundary result** (GSM8K, math specialist, n=500, paired 95% CIs) — recomputing more of the
+prefix is not uniformly better; full-prefix reuse returns closest to native.
+
+![Boundary result](paper/figures/boundary_result.png)
+
+**Specialist-dependence contrasts** — the individual math reuse penalty and QA seam exclude zero, but the
+*differences between specialists* include zero: no evidence the penalty is specialist-specific.
+
+![Specialist-dependence forest](paper/figures/forest.png)
 
 ## What this studies
 

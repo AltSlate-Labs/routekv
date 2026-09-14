@@ -40,7 +40,7 @@ ax.set_xlim(-140,tot+GENW+90); ax.set_ylim(-0.15,ytop+0.7)
 ax.axis("off")
 leg=[Patch(facecolor=BASE,label="reused base-computed KV"),Patch(facecolor=SPEC,label="specialist-computed"),Patch(facecolor=GEN,label="answer (generated)")]
 ax.legend(handles=leg,loc="lower center",bbox_to_anchor=(0.5,-0.13),ncol=3,frameon=False,fontsize=8.4,handlelength=1.1)
-plt.tight_layout(); plt.savefig(OUT+"boundary_schematic.svg",bbox_inches="tight"); plt.close()
+plt.tight_layout(); plt.savefig(OUT+"boundary_schematic.svg",bbox_inches="tight"); plt.savefig(OUT+"boundary_schematic.png",bbox_inches="tight",dpi=150); plt.close()
 
 # ---- Fig 2: systems savings (8K ctx) ----
 Ms=[2,4]; base_prefill=408; base_cache=0.94  # per-shared-prefix, once
@@ -74,7 +74,7 @@ for i,(c,d) in enumerate(zip(conds,dEM)):
 ax.set_xticks(xs); ax.set_xticklabels([f"{c}\n({r} tok reused)" for c,r in zip(conds,reused)],fontsize=8.3)
 ax.set_ylabel("$\\Delta$ EM vs native (pp)"); ax.set_title("Takeover boundary (GSM8K, math specialist, n=500)",fontsize=9.5)
 ax.set_ylim(-11,7); ax.spines[["top","right"]].set_visible(False)
-plt.tight_layout(); plt.savefig(OUT+"boundary_result.svg",bbox_inches="tight"); plt.close()
+plt.tight_layout(); plt.savefig(OUT+"boundary_result.svg",bbox_inches="tight"); plt.savefig(OUT+"boundary_result.png",bbox_inches="tight",dpi=150); plt.close()
 
 # ---- Fig 4: forest plot of specialist-dependence contrasts ----
 rows=[  # label, est, lo, hi, n
@@ -100,5 +100,5 @@ ax.set_title("Specialist-dependence contrasts (differences include zero)",fontsi
 ax.spines[["top","right","left"]].set_visible(False)
 leg=[Patch(color=ACC,label="excludes 0"),Patch(color=GREY,label="crosses 0")]
 ax.legend(handles=leg,loc="lower left",frameon=False,fontsize=8)
-plt.tight_layout(); plt.savefig(OUT+"forest.svg",bbox_inches="tight"); plt.close()
+plt.tight_layout(); plt.savefig(OUT+"forest.svg",bbox_inches="tight"); plt.savefig(OUT+"forest.png",bbox_inches="tight",dpi=150); plt.close()
 print("wrote 4 figures")

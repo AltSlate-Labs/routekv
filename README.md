@@ -38,7 +38,7 @@ baseline:
 | QA 8K (F1, n=200) | 43.3 | 72.5 | 67.9 | −4.5 [−9.3,+0.1] | **486→30 ms (≈16×)** |
 
 - **The adapter is necessary** — base-only trails native by 46 EM (GSM8K) and 27–29 F1 (QA), under the tested decoding budget.
-- **Reuse costs a small quality difference that is not robust.** The QA penalty grows with context (+0.3 F1 at 700 tok → −6.6 at 2K). On GSM8K the held-out penalty is **unstable across decoding budget and training seed**: −4.6 (160-tok, seed 1) → −3.0 (320-tok) → −0.8 (second seed); only the first excludes zero. Adapter necessity (base-only −45 EM) reproduces cleanly.
+- **Reuse costs a small quality difference of uncharacterized magnitude.** The QA penalty grows with context (+0.3 F1 at 700 tok → −6.6 at 2K). On held-out GSM8K the point estimate is −4.6 EM (160-tok, seed 1), −3.0 (320-tok), −0.8 (second seed) — all favor native, but only the first excludes zero, and the two direct paired contrasts (budget +1.6 [−0.8,+4.0]; seed +3.8 [−0.4,+8.2]) both include zero, so neither budget nor seed is *shown* to change it. Adapter necessity (base-only −45 EM, tested decoding budget) reproduces cleanly.
 - **Warm-cache TTFT is the real win**, growing with context to ≈16× at 8K (base-prefix construction excluded and reported separately). A TTFT win does *not* imply a completion-latency win — reuse generates longer.
 
 **Memory — the main correction to earlier drafts.** This implementation reuses KV *values* but **copies their

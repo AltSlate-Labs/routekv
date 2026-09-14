@@ -28,27 +28,34 @@ separates *how many tokens are reused* from *which content the specialist re-enc
 
 ## What we find
 
-**Full-prefix reuse is the cheapest condition and the closest to native**, with a small observed quality
-difference — GSM8K exact-match Δ = −1.0 points (95% CI [−5.0, +3.0]). Equivalence is *not* established: the
-interval still permits a real loss. **Partial recomputation** (the specialist re-encodes only the question
-over a base-encoded prefix) gives *no* demonstrated advantage and the worst point estimate. Recomputing more
-of the prefix is not uniformly better.
+Prefix reuse is a **quality–latency tradeoff**, measured on identical examples per setting with a base-only
+baseline:
 
-![Boundary sweep on GSM8K (n=500, paired 95% CIs): the relationship is non-monotonic and full-prefix reuse returns closest to native](paper/figures/boundary_result.png)
+| setting | base-only | native | reuse | Δ reuse−native | warm-cache TTFT (nat→reuse) |
+|---|---|---|---|---|---|
+| GSM8K (EM, held-out n=500) | 8.4 | 54.4 | 49.8 | **−4.6 [−8.8,−0.4]** | 38→30 ms |
+| QA 2K (F1, n=300) | 42.7 | 69.4 | 62.8 | **−6.6 [−10.5,−2.7]** | 96→30 ms |
+| QA 8K (F1, n=200) | 43.3 | 72.5 | 67.9 | −4.5 [−9.3,+0.1] | **486→30 ms (≈16×)** |
 
-**No evidence the penalty is specialist-specific.** The individual math reuse penalty and the QA seam each
-exclude zero, but the *differences between specialists* — the penalty difference and the seam
-difference-in-differences — both include zero, and the latter's point estimate reverses.
+- **The adapter is necessary** — base-only trails native by 46 EM (GSM8K) and 27–29 F1 (QA), under the tested decoding budget.
+- **Reuse costs a small, mostly significant amount of quality**, and the QA penalty grows with context (+0.3 F1 at 700 tok → −6.6 at 2K). Part of the GSM8K gap may be truncation (reuse hits the 160-token cap 30% vs native's 15%); a frozen larger-budget diagnostic is resolving this.
+- **Warm-cache TTFT is the real win**, growing with context to ≈16× at 8K (base-prefix construction excluded and reported separately). A TTFT win does *not* imply a completion-latency win — reuse generates longer.
+
+**Memory — the main correction to earlier drafts.** This implementation reuses KV *values* but **copies their
+storage**: across two simultaneously-retained branches, peak memory was only 12% lower at 8K (5% at 2K) and
+the prefix was **never physically shared** (0% of trials, before or after generation). Shared-cache memory
+savings are *not* achieved and would need a paged cache.
+
+Recomputing more of the prefix is **not** uniformly better (mechanism probe below), and there is **no
+evidence the penalty is specialist-specific** — individual effects exclude zero, but the differences between
+specialists include it.
+
+![Boundary sweep on GSM8K (paired 95% CIs): non-monotonic; full-prefix reuse returns closest to native](paper/figures/boundary_result.png)
 
 ![Specialist-dependence contrasts: individual effects exclude zero, but the between-specialist differences include it](paper/figures/forest.png)
 
-**A ridge KV translator did not beat direct reuse**, and its cost was not justified. On the systems side,
-reuse turns *M* shared-prefix prefills into one and deduplicates prefix storage; initial cache aliasing is
-verified, but **peak memory during generation is not yet measured** — the central open serving question.
-
-This is a preliminary empirical report. Known limits: a single adapter seed per task, one 1.7B backbone,
-quality measured at ≈655-token prompts while storage is shown at 8K, and an overlapping (not held-out)
-follow-up sample. See the paper's Limitations.
+A ridge KV translator did not beat direct reuse. This is a preliminary empirical report: single adapter seed
+per task, one 1.7B backbone, and the truncation question is still open. See the paper's Limitations.
 
 ## Repository
 

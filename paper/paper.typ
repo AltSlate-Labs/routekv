@@ -20,9 +20,10 @@
     our tested setup. Partial recomputation provided no demonstrated quality advantage. Neither quality
     equivalence nor a general boundary-selection rule is established.] We also report a closed-form ridge KV
     translator that did not beat direct reuse, and specialist-dependence contrasts whose intervals all
-    include zero. The serving benefit is a reduction from $M$ shared-prefix prefills to one (each specialist
-    still runs a suffix forward), plus deduplicated prefix storage; the wall-time and peak-memory
-    implications depend on the workload and are only partly measured here.
+    include zero. The measured serving benefit is #strong[warm-cache time-to-first-token], which grows with
+    context (≈16× at 8K); two-branch peak memory was only 12% lower and, on inspection, the prefix was
+    #emph[never physically shared] across branches — this implementation reuses KV #emph[values] but copies
+    their storage, so shared-cache memory savings are not achieved.
   ],
   keywords: ("KV cache", "LoRA", "efficient serving", "small language models", "prefix reuse"),
   date: "September 2026",
@@ -109,31 +110,68 @@ ranges, and timing methodology are in @app-repro.
 
 = Serving cost
 
-Reuse changes three distinct quantities, which the draft keeps separate to avoid overstating the benefit.
+We separate three quantities and, where possible, replace structural arithmetic with direct measurement.
+The central distinction is between #strong[logical] reuse (a specialist reuses previously-computed KV
+#emph[values], skipping their recomputation) and #strong[physical] sharing (those values occupy one copy of
+storage across branches). This implementation achieves the former; §3.2 shows it does #emph[not] achieve the
+latter.
 
-*Prefill count (structural, exact).* When $M$ specialists answer over one shared context, the shared prefix
-is prefilled once instead of $M$ times. This ratio is exactly $M$ by construction, independent of the
-adapters.
+*Prefill count (structural).* When $M$ specialists answer over one shared context, the shared prefix is
+prefilled once instead of $M$ times. Reuse does not make per-specialist work vanish: each specialist still
+runs a suffix forward over its non-reused tokens plus generation (@lst-reuse). @tab-cost gives single-prefix
+cost; the native per-specialist prefill (489 ms at 8K) exceeds the base prefill (413 ms) that reuse pays
+once.
 
-*Prefix storage (aliasing verified initially; peak memory not measured).* The shared prefix's KV can be a
-single allocation rather than $M$ copies. #strong[The implementation demonstrates initial prefix-cache
-aliasing. Persistent sharing and its effect on peak memory during generation remain unmeasured] (we did not
-instrument peak allocation while branches generate, where concatenation or copy-on-write could break
-sharing). Whether this becomes a peak-memory saving depends on the workload: it can help
-#emph[simultaneously retained] branches (several specialists answering one context at once) and does nothing
-for #emph[sequential] requests that free each cache before the next. Measuring peak memory during actual
-branching is the key open serving measurement (@sec-limits).
+=== Warm-cache latency (measured)
 
-*Measured prefill time (benchmark-dependent, $approx M times$, not exact).* Reuse does not make per-specialist
-work vanish: each specialist still runs a #emph[suffix forward] over its non-reused tokens plus generation
-(@lst-reuse). The saving is on the #emph[shared-prefix] portion — one base prefill replaces $M$. For $M$
-requests over one shared prefix the shared-prefix wall-time ratio is
-$ (M dot t_"prefill,specialist") / (t_"prefill,base" + t_"handoff"), $
-which approaches $M times$ only when handoff is small. @tab-cost gives single-prefix cost; note the native
-per-specialist prefill (489 ms at 8K) exceeds the base prefill (413 ms) that reuse pays once. @tab-scale's
-8K microbenchmark instead repeated the #emph[base] prefill (408 ms), so its "$4 times 408$" is a
-repeated-base-prefill figure, not four adapter-enabled prefills; 408 vs 413 ms are separate runs agreeing to
-≈1%.
+@tab-serving reports latency across the three matched settings. TTFT for reuse is measured #emph[warm-cache]:
+it excludes constructing the base prefix cache (that one-time cost — 40/91/417 ms at 655/2K/8K — is amortized
+across specialists and reported separately) and #emph[includes] the specialist's final-prompt-token forward
+(@lst-reuse). Warm-cache TTFT is where reuse wins, and the win grows with context: at 8K, 30 ms vs. 486 ms,
+a #strong[≈16× warm-cache TTFT speedup]. Because reuse also generates #emph[longer] outputs on GSM8K (§4),
+a TTFT improvement does #emph[not] imply a completion-latency improvement: completion was faster at 8K QA
+(265 vs. 582 ms) but slower on GSM8K (3149 vs. 2787 ms).
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto, auto, auto, auto), inset: 4.5pt, align: (left,)+(right,)*6, stroke: 0.4pt,
+    [*setting*], [*TTFT nat*], [*TTFT reuse*], [*compl nat*], [*compl reuse*], [*1-req peak nat*], [*reuse*],
+    [GSM8K ≈655], [38 ms], [30 ms], [2787 ms], [3149 ms], [3.83 GB], [3.65 GB],
+    [QA 2K], [96 ms], [30 ms], [188 ms], [196 ms], [4.57 GB], [3.95 GB],
+    [QA 8K], [486 ms], [30 ms], [582 ms], [265 ms], [7.79 GB], [5.35 GB],
+  ),
+  caption: [
+    Warm-cache latency and single-request peak memory (means; GSM8K $n=500$, QA-2K $n=300$, QA-8K $n=200$).
+    Reuse TTFT excludes the one-time base prefill (40/91/417 ms) and includes the specialist's final-token
+    forward. Single-request peak is lower for reuse at long context because it skips native's full-context
+    prefill activation spike; this is a per-request working-set effect, not cross-branch sharing (§3.2).
+  ],
+) <tab-serving>
+
+=== Two-branch memory: logical reuse, no physical sharing
+
+We held two branches (QA + math) over one shared context and measured peak allocation across generation
+(@tab-residency). Two-branch peak was #strong[12% lower at 8K and 5% lower at 2K] under reuse. #strong[This
+is not a sharing effect]: inspecting tensor storage, the two branches' prefix KV was never physically shared
+— 0% of trials aliased the prefix, #emph[before or after] generation — because the cache concatenates
+new keys/values each step, copying the prefix into each branch. The modest reduction comes from reuse doing
+one base prefill instead of two adapter prefills, not from one copy of the prefix serving both branches.
+Persistent shared-cache storage would require an implementation that preserves shared storage during
+generation (a paged cache is one route); it #strong[remains unimplemented here].
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto, auto), inset: 5pt, align: (right, right, right, right, center), stroke: 0.4pt,
+    [*context*], [*peak nat (2 br.)*], [*peak reuse*], [*reuse/native*], [*prefix physically shared?*],
+    [2048], [4.62 GB], [4.38 GB], [0.95×], [no (0%)],
+    [8192], [7.92 GB], [6.98 GB], [0.88×], [no (0%)],
+  ),
+  caption: [
+    Two simultaneously-retained branches (QA + math) over one shared context, $n=20$, 32 generated tokens
+    each. Reuse's peak is modestly lower (one base prefill vs. two), but the prefix is never physically
+    shared across branches — the saving is not from sharing.
+  ],
+) <tab-residency>
 
 #figure(
   table(
@@ -144,32 +182,17 @@ repeated-base-prefill figure, not four adapter-enabled prefills; 408 vs 413 ms a
     [8192], [940 MB], [413 ms], [489 ms],
   ),
   caption: [
-    Single-prefix cost (Qwen3-1.7B, bf16; one benchmark run). Cache is what reuse deduplicates; prefill is
-    what reuse avoids repaying per specialist. Specialist prefill exceeds base by the adapter's
-    matrix-multiply overhead.
+    Single-prefix cost (Qwen3-1.7B, bf16; one benchmark run). Cache is the KV tensor footprint reuse avoids
+    recomputing; prefill is what reuse avoids repaying per specialist. Specialist prefill exceeds base by the
+    adapter's matrix-multiply overhead.
   ],
 ) <tab-cost>
 
-#figure(
-  table(
-    columns: (auto, auto, auto), inset: 5pt, align: (right, right, right), stroke: 0.4pt,
-    [*specialists $M$*], [*prefill count*], [*retained prefix caches*],
-    [2], [2 → 1], [2 → 1],
-    [4], [4 → 1], [4 → 1],
-  ),
-  caption: [
-    Structural ratios (exact, adapter-agnostic). A separate 8K microbenchmark repeated the #emph[base]
-    prefill $M=4$ times: $1632 → 408$ ms ($4 times 408$ ms → one) and retained prefix-cache tensor
-    footprint $3.76 → 0.94$ GB. This is a repeated-base-prefill figure, not four adapter-enabled prefills,
-    and the storage figure is tensor footprint, not measured peak memory during generation (see text).
-  ],
-) <tab-scale>
-
-*Scope.* Backbone weights (3.5 GB) are shared once regardless of reuse; per-specialist answer-side caches
-and working buffers are unchanged. The benefit therefore scales with how much of the workload is shared
-context relative to per-specialist generation. The quality study below uses ≈655-token prompts, whereas the
-striking storage figures use 8K contexts; these are #emph[separate] measurements and we do not claim the
-small quality difference transfers to 8K (@sec-limits).
+*Scope.* Backbone weights (3.5 GB) are resident once regardless of reuse; per-specialist answer-side caches
+and generation buffers are unchanged. The serving benefit is warm-cache latency (largest at long context),
+not a peak-memory reduction from sharing. The quality study (§4) uses ≈655-token GSM8K prompts and 2K/8K QA
+contexts, so quality and latency are reported at matched scales; equivalence at any scale is not claimed
+(@sec-limits).
 
 = Quality of reused-KV inference
 
@@ -180,12 +203,52 @@ KV or first-token logit deltas), so we report the discrepancy as consistent with
 cache-reconstruction differences but #emph[not further diagnosed]. It is small relative to the cross-source
 effects below.
 
-*Extractive QA with supplied context (small observed difference).* This result is #emph[not] the full
+*Central result.* On 500 untouched GSM8K examples, full-prefix base-KV reuse reduced accuracy from 54.4% to
+49.8% ($Delta = -4.6$ percentage points; paired CI $[-8.8, -0.4]$). In the 8K supplied-context QA workload,
+reuse reduced warm-cache TTFT from 486 ms to 30 ms. Two-branch peak memory was 12% lower, but storage
+inspection found no physical prefix sharing. These results establish a quality–TTFT tradeoff; persistent
+shared-cache storage remains unimplemented.
+
+*Matched quality with a base-only baseline.* @tab-quality gives the three conditions on identical examples
+per setting. The adapter is necessary: base-only trails native by 46 EM on GSM8K and 27–29 F1 on QA — though,
+since base-only reaches the 160-token generation limit on 100% of GSM8K examples, this establishes adapter
+necessity #emph[under the tested decoding budget], not budget-independent inferiority. Full-prefix reuse
+costs a small but mostly significant amount of quality: $-4.6$ EM on GSM8K and $-6.6$/$-4.5$ F1 on QA at
+2K/8K.
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto, auto, auto), inset: 4.5pt, align: (left,)+(right,)*5, stroke: 0.4pt,
+    [*setting (metric)*], [*base-only*], [*native*], [*reuse*], [*Δ reuse−native*], [*cap% nat/reuse*],
+    [GSM8K, EM ($n$=500)], [8.4], [54.4], [49.8], [$-4.6$ $[-8.8,-0.4]$], [15 / 30],
+    [QA 2K, F1 ($n$=300)], [42.7], [69.4], [62.8], [$-6.6$ $[-10.5,-2.7]$], [0 / 0.7],
+    [QA 8K, F1 ($n$=200)], [43.3], [72.5], [67.9], [$-4.5$ $[-9.3,+0.1]$], [0 / 3],
+  ),
+  caption: [
+    Matched quality on identical examples per setting (paired bootstrap CIs). base-only Δ vs native is
+    $-46.0$/$-26.6$/$-29.2$ (all excluding zero). GSM8K uses untouched `test[580:1080]`; QA uses constructed
+    2K/8K contexts (gold paragraphs preserved, @app-repro). cap% is the fraction reaching the 160-token limit.
+  ],
+) <tab-quality>
+
+*Truncation.* Reuse increased the frequency of reaching the 160-token generation limit from 15% to 30% on
+GSM8K. The contribution of truncation to the accuracy difference remains unresolved; a focused follow-up
+compares native and reuse at a larger, pre-frozen generation budget on all 500 examples (in progress).
+
+*Held-out vs. overlapping evaluation.* The GSM8K penalty above ($-4.6$, `test[580:1080]`) comes from
+examples untouched by any earlier run. The boundary study below used `test[80:580]`, which overlaps prior
+development, and gave $-1.0$ $[-5.0,+3.0]$ for the same full-prefix condition. The two intervals overlap, so
+we do #emph[not] claim overlap #emph[caused] the difference; we take the untouched evaluation to establish a
+penalty under this protocol, and treat the overlapping one as insufficient confirmation.
+
+*Extractive QA with supplied context.* This result is #emph[not] the full
 distractor-retrieval task: for each HotpotQA @hotpotqa example we concatenate the distractor context (all 10
 paragraphs, 2 gold + 8 distractor) and truncate to 700 tokens, then reuse the base prefix cache of that
 context for the QA specialist. Truncation can drop answer-bearing text (not audited), so scores are a lower
-bound on the oracle-context setting. On this setting (F1, $n=500$), reuse matched native to within the
-interval: $Delta = +0.3$ F1 points, CI $[-1.5, +2.2]$ (@tab-qa). The reasoning task is the harder case.
+bound on the oracle-context setting. At this #emph[short] (700-tok) context, reuse matched native:
+$Delta = +0.3$ F1, CI $[-1.5, +2.2]$ (@tab-qa). Read with @tab-quality, the QA reuse penalty is
+#strong[context-dependent]: $+0.3$ at 700 tok, then $-6.6$ (2K) and $-4.5$ (8K) — reuse is not free once the
+shared context is long.
 
 #figure(
   table(
@@ -203,8 +266,9 @@ interval: $Delta = +0.3$ F1 points, CI $[-1.5, +2.2]$ (@tab-qa). The reasoning t
   ],
 ) <tab-qa>
 
-*Takeover boundary (GSM8K, math specialist, $n=500$).* Moving only $b$ (@tab-boundary, @fig-boundary), the
-relationship is non-monotonic: recomputing more of the prefix is not uniformly better.
+*Takeover boundary (GSM8K, math specialist, $n=500$, overlapping sample `test[80:580]`).* As a mechanism
+probe, moving only $b$ (@tab-boundary, @fig-boundary) gives a non-monotonic pattern: recomputing more of the
+prefix is not uniformly better. (This is the overlapping-sample study; the held-out penalty is above.)
 
 #figure(
   table(
@@ -276,14 +340,12 @@ establish specialist dependence; we do not inflate the sample to seek significan
 
 = Limitations and future work <sec-limits>
 
-The central positive claim is that full-prefix reuse is close to native in our setup, and its interval does
-#emph[not] establish equivalence — a real loss up to ≈5pp is not excluded. Several gaps bound the claims:
+The central claim is a quality–latency tradeoff, not equivalence: the GSM8K held-out reuse penalty ($-4.6$)
+excludes zero and the QA penalty grows with context. Several gaps bound the claims:
 
-- #strong[Quality and serving cost are measured at different scales.] Quality uses ≈655-token prompts;
-  the storage figures use 8K. The single most useful next experiment is one #strong[matched workload]: on a
-  shared-context task, measure task quality, total peak allocated memory, and completion latency #emph[together]
-  across context lengths, including #strong[base-only] inference (if the reused specialist adds little over
-  the base, the adapter's necessity is in question).
+- #strong[Truncation is unresolved.] Reuse doubled the GSM8K generation-cap rate (15%→30%), so part of the
+  EM gap may be truncation rather than reasoning. The pre-frozen larger-budget diagnostic (native vs. reuse
+  at 320 tokens on all 500 examples) is running to settle this; until then the penalty's composition is open.
 - #strong[Two "shared context" workloads differ.] Full-prefix reuse as measured shares an #emph[identical
   full prompt] across specialists. Sharing #emph[background passages] across #emph[different] questions is a
   different setting our full-prefix result does not establish; it corresponds to a mid-prompt boundary, which
@@ -319,16 +381,17 @@ an #emph[identical] prefix under the #emph[same] model. Our question is reuse of
 
 = Conclusion
 
-For composable serving on a shared backbone, reusing the backbone's prefill KV cache across
-already-trained standard LoRA specialists reduces $M$ prefills and $M$ retained prefix caches to one; the
-wall-time ($approx M times$ for sequential identical prefills) and peak-memory (for simultaneously-retained
-branches) implications depend on the workload. On quality: full-prefix reuse had the lowest prefill cost and
-a small observed quality difference in our tested setup (extractive QA within noise; GSM8K
-$Delta = -1.0$pp), partial recomputation provided no demonstrated advantage, and neither quality equivalence
-nor a general boundary-selection rule is established. A ridge translator did not earn its cost, and
-specialist-dependence contrasts did not resolve. The useful next steps are a matched quality–memory–latency
-workload at a fixed scale and a frozen replication; the claims above should be confirmed on one's own
-adapters before reuse is assumed lossless.
+For composable serving on a shared backbone, reusing the backbone's prefill KV cache across already-trained
+standard LoRA specialists is a #strong[quality–latency tradeoff]. The measured benefit is warm-cache
+time-to-first-token, which grows with context (≈16× at 8K); the cost is a small, mostly significant quality
+loss (GSM8K $-4.6$ EM on held-out examples; QA $-6.6$/$-4.5$ F1 at 2K/8K), part of which may be generation
+truncation (unresolved). The memory story is the paper's main correction: this implementation reuses KV
+#emph[values] but #emph[copies their storage] — two-branch peak was only 12% lower at 8K and the prefix was
+never physically shared, so shared-cache memory savings are #emph[not] achieved and would need a paged cache.
+Partial recomputation gave no demonstrated advantage; a ridge translator did not earn its cost;
+specialist-dependence did not resolve. The immediate next step is the frozen generation-budget diagnostic
+(to settle the truncation question), then a replication on another seed/backbone; the claims above should be
+confirmed on one's own adapters before reuse is assumed lossless.
 
 #pagebreak()
 = Specialist-dependence contrasts (appendix) <app-forest>
@@ -390,10 +453,10 @@ of per-example differences @bootstrap; per-example arrays are released.
 
 #strong[Systems measurement.] transformers 5.5 / peft 0.20 / torch 2.11, one NVIDIA RTX PRO 4500 Blackwell
 GPU; attention backend and exact timing protocol (warmup, repetitions, CUDA synchronization) are pinned in
-the repo — reported timings here are single-run. @tab-cost and @tab-scale are separate runs (the ≈1%
-base-prefill difference). Prefix-cache figures are KV tensor footprint; the single-allocation claim is a
-pointer-identity check establishing initial aliasing only — peak memory under concurrent generation was not
-measured.
+the repo — reported timings here are single-run. @tab-cost (single-prefix cost), @tab-serving (warm-cache
+latency), and @tab-residency (two-branch peak) are separate runs. Prefix-cache figures in @tab-cost are KV
+tensor footprint. The physical-sharing check (@tab-residency) is a `data_ptr` identity test across the two
+branches' prefix tensors, measured before and after generation.
 
 #strong[Translator.] Per-head ridge maps calibrated on 40 held-out HotpotQA distractor contexts (`N_CAL=40`)
 with RoPE-stripped keys; single-layer $l→l$ and top-$k$ multi-layer variants; ridge regularization

@@ -38,7 +38,7 @@ baseline:
 | QA 8K (F1, n=200) | 43.3 | 72.5 | 67.9 | −4.5 [−9.3,+0.1] | **486→30 ms (≈16×)** |
 
 - **The adapter is necessary** — base-only trails native by 46 EM (GSM8K) and 27–29 F1 (QA), under the tested decoding budget.
-- **Reuse costs a small, mostly significant amount of quality**, and the QA penalty grows with context (+0.3 F1 at 700 tok → −6.6 at 2K). Part of the GSM8K gap may be truncation (reuse hits the 160-token cap 30% vs native's 15%); a frozen larger-budget diagnostic is resolving this.
+- **Reuse costs a small amount of quality**, and the QA penalty grows with context (+0.3 F1 at 700 tok → −6.6 at 2K). Part of the GSM8K gap is truncation: reuse hits the 160-token cap 30% vs native's 15%, and at a frozen 320-token budget the penalty shrinks from **−4.6 to −3.0 (CI includes zero)** — smaller and no longer significant, though still negative.
 - **Warm-cache TTFT is the real win**, growing with context to ≈16× at 8K (base-prefix construction excluded and reported separately). A TTFT win does *not* imply a completion-latency win — reuse generates longer.
 
 **Memory — the main correction to earlier drafts.** This implementation reuses KV *values* but **copies their
